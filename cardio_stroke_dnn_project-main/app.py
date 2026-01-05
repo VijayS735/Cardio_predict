@@ -4,11 +4,45 @@ import h5py
 from tensorflow import keras
 import json
 import warnings
+import os
+import requests
+from pathlib import Path
+
 warnings.filterwarnings('ignore')
+
+# Download model from GitHub if not present
+@st.cache_resource
+def download_model_if_needed():
+    """Download model from GitHub releases if local file not found"""
+    model_path = "stroke_prediction_model.h5"
+    
+    # Check if model exists locally
+    if os.path.exists(model_path):
+        return model_path
+    
+    # Try to download from GitHub
+    st.info("📥 Model file not found locally. Attempting to download from GitHub...")
+    try:
+        github_url = "https://github.com/VijayS735/Cardio_predict/raw/main/cardio_stroke_dnn_project-main/stroke_prediction_model.h5"
+        response = requests.get(github_url, timeout=30)
+        
+        if response.status_code == 200:
+            with open(model_path, 'wb') as f:
+                f.write(response.content)
+            st.success("✅ Model downloaded successfully!")
+            return model_path
+        else:
+            raise Exception(f"HTTP {response.status_code}")
+    except Exception as e:
+        st.error(f"❌ Failed to download model: {str(e)}")
+        return None
 
 # Load trained model with compatibility fix
 def load_model_with_fix(model_path):
     """Load model and handle quantization_config compatibility issue"""
+    if model_path is None:
+        raise FileNotFoundError("Model file not available")
+        
     try:
         return keras.models.load_model(model_path)
     except (TypeError, ValueError) as e:
@@ -40,7 +74,12 @@ def load_model_with_fix(model_path):
         else:
             raise
 
-model = load_model_with_fix("stroke_prediction_model.h5")
+# Initialize model
+model_path = download_model_if_needed()
+if model_path:
+    model = load_model_with_fix(model_path)
+else:
+    st.stop()
 
 st.title("💓 Cardiovascular Stroke Prediction")
 st.write("Select patient details to assess stroke risk")
