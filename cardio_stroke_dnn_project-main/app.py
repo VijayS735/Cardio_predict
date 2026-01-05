@@ -13,28 +13,53 @@ warnings.filterwarnings('ignore')
 # Download model from GitHub if not present
 @st.cache_resource
 def download_model_if_needed():
-    """Download model from GitHub releases if local file not found"""
-    model_path = "stroke_prediction_model.h5"
+    """Download model from GitHub if local file not found"""
+    # Try multiple possible locations for the model
+    possible_paths = [
+        "stroke_prediction_model.h5",
+        "./stroke_prediction_model.h5",
+        os.path.join(os.path.dirname(__file__), "stroke_prediction_model.h5"),
+    ]
     
-    # Check if model exists locally
-    if os.path.exists(model_path):
-        return model_path
+    # Check if model exists in any location
+    for model_path in possible_paths:
+        if os.path.exists(model_path) and os.path.getsize(model_path) > 1000:
+            st.success("✅ Model loaded from local file")
+            return model_path
     
     # Try to download from GitHub
-    st.info("📥 Model file not found locally. Attempting to download from GitHub...")
+    st.info("📥 Model file not found locally. Downloading from GitHub (this may take 1-2 minutes)...")
     try:
-        github_url = "https://github.com/VijayS735/Cardio_predict/raw/main/cardio_stroke_dnn_project-main/stroke_prediction_model.h5"
-        response = requests.get(github_url, timeout=30)
+        # Create temp directory if needed
+        temp_dir = "/tmp" if os.name != "nt" else os.path.expanduser("~/.streamlit/cache")
+        os.makedirs(temp_dir, exist_ok=True)
+        model_path = os.path.join(temp_dir, "stroke_prediction_model.h5")
         
-        if response.status_code == 200:
+        github_url = "https://github.com/VijayS735/Cardio_predict/raw/main/cardio_stroke_dnn_project-main/stroke_prediction_model.h5"
+        
+        with st.spinner("⏳ Downloading model... This may take a moment"):
+            response = requests.get(github_url, timeout=60, stream=True)
+            response.raise_for_status()
+            
+            # Download with progress
+            total_size = int(response.headers.get('content-length', 0))
+            progress_bar = st.progress(0)
+            downloaded = 0
+            
             with open(model_path, 'wb') as f:
-                f.write(response.content)
-            st.success("✅ Model downloaded successfully!")
-            return model_path
-        else:
-            raise Exception(f"HTTP {response.status_code}")
+                for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            progress_bar.progress(min(downloaded / total_size, 1.0))
+        
+        st.success("✅ Model downloaded successfully!")
+        return model_path
+        
     except Exception as e:
-        st.error(f"❌ Failed to download model: {str(e)}")
+        st.error(f"❌ Failed to download model: {str(e)}\n\nPlease try refreshing the page or contact support.")
+        st.stop()
         return None
 
 # Load trained model with compatibility fix
@@ -47,6 +72,7 @@ def load_model_with_fix(model_path):
         return keras.models.load_model(model_path)
     except (TypeError, ValueError) as e:
         if "quantization_config" in str(e):
+            st.warning("⚠️ Fixing model compatibility issue...")
             # Remove quantization_config from the h5 file
             with h5py.File(model_path, 'r+') as f:
                 if 'model_config' in f.attrs:
